@@ -40,7 +40,7 @@ jobs:
           # Tests run directly on the runner so we have to map the port
           - 9092:9092
       endpoint:
-        image: forumviriumhelsinki/mittaridatapumppu-endpoint:latest
+        image: ghcr.io/city-of-helsinki/mittaridatapumppu-endpoint:latest
         env:
           ALLOWED_IP_ADDRESSES: "127.0.0.1"
           AUTH_TOKEN: "abcd1234"
