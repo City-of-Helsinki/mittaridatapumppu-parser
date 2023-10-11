@@ -191,7 +191,7 @@ def process_kafka_raw_topic(raw_data: bytes):
 
 def main():
     init_script()
-    raw_data_topic = "cesva.rawdata"  # os.getenv("KAFKA_RAW_DATA_TOPIC_NAME")
+    raw_data_topic = os.getenv("KAFKA_RAW_DATA_TOPIC_NAME")
     parsed_data_topic = os.getenv("KAFKA_PARSED_DATA_TOPIC_NAME")
     logging.info(f"Get Kafka consumer for {raw_data_topic} and producer for {parsed_data_topic}")
     # Create Kafka consumer for incoming raw data messages
