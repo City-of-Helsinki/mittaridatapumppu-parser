@@ -3,13 +3,14 @@
 version: '3.8'
 
 services:
-  parser-digita:
-    image: ghcr.io/city-of-helsinki/mittaridatapumppu-parser
+  parser:
+    #image: ghcr.io/city-of-helsinki/mittaridatapumppu-parser
     build: .
-    depends_on:
-      kafka:
-        condition: service_healthy
-    restart: unless-stopped
+    #command: ["python", "./watcher.py"]
+    # depends_on:
+    #   kafka:
+    #     condition: service_healthy
+    #restart: unless-stopped
     environment:
       KAFKA_HOST: "kafka"
       KAFKA_PORT: 9092
@@ -17,34 +18,46 @@ services:
       KAFKA_GROUP_ID: "digita_dev"
       KAFKA_PARSED_DATA_TOPIC_NAME: "digita.parseddata"
       KAFKA_RAW_DATA_TOPIC_NAME: "digita.rawdata"
+      DEVREG_ENDPOINTS_URL: "http://devreg:8000/api/v1/hosts/localhost/"
       DEVICE_REGISTRY_URL: "http://devreg:8000/api/v1"
-      DEVICE_REGISTRY_TOKEN: b48455759b691baf3b811ba437ce9e581fc0a37e
+      DEVICE_REGISTRY_TOKEN: abcdef1234567890abcdef1234567890abcdef12
       LOG_LEVEL: "DEBUG"
       DEBUG: 1
       DEV_SERVER: 1
-  kafka:
-    image: bitnami/kafka:3.4
-    ports:
-      - "9092:9092"
     volumes:
-      - "kafka_data:/bitnami"
-    environment:
-      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
-      # Kafka KRaft settings
-      KAFKA_CFG_NODE_ID: 0
-      KAFKA_CFG_PROCESS_ROLES: "controller,broker"
-      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: "0@kafka:9093"
-      # Listeners
-      KAFKA_CFG_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
-      KAFKA_CFG_ADVERTISED_LISTENERS: "PLAINTEXT://:9092"
-      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
-      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
-      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
-    healthcheck:
-      interval: 10s
-      retries: 3
-      test: kafka-topics.sh --bootstrap-server kafka:9092 --topic hc --create --if-not-exists && kafka-topics.sh --bootstrap-server kafka:9092 --topic hc --describe
-      timeout: 5s
+      - .:/home/app
+      - ../fvhiot-python/fvhiot:/home/app/fvhiot
+    networks:
+      - mittaridatapumppu-dev_dkrnw
 
-volumes:
-  kafka_data:
+#   kafka:
+#     image: bitnami/kafka:3.4
+#     ports:
+#       - "9092:9092"
+#     volumes:
+#       - "kafka_data:/bitnami"
+#     environment:
+#       KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+#       # Kafka KRaft settings
+#       KAFKA_CFG_NODE_ID: 0
+#       KAFKA_CFG_PROCESS_ROLES: "controller,broker"
+#       KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: "0@kafka:9093"
+#       # Listeners
+#       KAFKA_CFG_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
+#       KAFKA_CFG_ADVERTISED_LISTENERS: "PLAINTEXT://:9092"
+#       KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+#       KAFKA_CFG_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+#       KAFKA_CFG_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+#     healthcheck:
+#       interval: 10s
+#       retries: 3
+#       test: kafka-topics.sh --bootstrap-server kafka:9092 --topic hc --create --if-not-exists && kafka-topics.sh --bootstrap-server kafka:9092 --topic hc --describe
+#       timeout: 5s
+
+# volumes:
+#   kafka_data:
+
+
+networks:
+  mittaridatapumppu-dev_dkrnw:
+    external: true
