@@ -5,14 +5,28 @@ import os
 import pathlib
 from pprint import pformat
 from zoneinfo import ZoneInfo
-
+import asyncio
 import httpx
-from kafka.producer.future import RecordMetadata
-
+from kafka.errors import UnknownTopicOrPartitionError
 
 from fvhiot.utils import init_script
 from fvhiot.utils.data import data_unpack, data_pack
-from fvhiot.utils.kafka import get_kafka_producer_by_envs, get_kafka_consumer_by_envs
+from fvhiot.utils.aiokafka import (
+    get_aiokafka_producer_by_envs,
+    get_aiokafka_consumer_by_envs,
+    on_send_success,
+    on_send_error,
+)
+
+# TODO: for testing, add better defaults (or remove completely to make sure it is set in env)
+DEVREG_ENDPOINTS_URL = os.getenv("DEVREG_ENDPOINTS_URL", "http://127.0.0.1:8000/api/v1/hosts/localhost/")
+DEVREG_API_TOKEN = os.getenv("DEVREG_API_TOKEN", "abcdef1234567890abcdef1234567890abcdef12")
+
+device_registry_request_headers = {
+    "Authorization": f"Token {DEVREG_API_TOKEN}",
+    "User-Agent": "mittaridatapumppu-endpoint/0.1.0",
+    "Accept": "application/json",
+}
 
 
 def backup_messages(raw_data_topic: str, msg):
@@ -33,21 +47,7 @@ def backup_messages(raw_data_topic: str, msg):
         logging.error(msg)
 
 
-# TODO: to kafka module
-def on_send_success(record_metadata: RecordMetadata):
-    logging.info(
-        "Successfully sent to topic {}, partition {}, offset {}".format(
-            record_metadata.topic, record_metadata.partition, record_metadata.offset
-        )
-    )
-
-
-# TODO: to kafka module
-def on_send_error(excp):
-    logging.error("Error on Kafka producer", exc_info=excp)
-
-
-def get_device_data_devreg(device_id: str) -> dict:
+async def get_device_data_devreg(device_id: str) -> dict:
     """
     Get device metadata from device registry
 
@@ -75,21 +75,63 @@ def get_device_data_devreg(device_id: str) -> dict:
         "Authorization": f"Token {devreg_token}",
         "User-Agent": "mittaridatapumppu-parser/0.0.1",
     }
-
-    try:
-        response = httpx.get(url, headers=headers)
-        if response.status_code == 200:
-            metadata = response.json()
-            logging.debug(metadata)
-        else:
-            logging.warning(f"Device registry returned {response.status_code} {response.text}")
-    except httpx.HTTPError as err:
-        logging.exception(f"{err}")
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(url, headers=headers)
+            if response.status_code == 200:
+                metadata = response.json()
+                logging.debug(metadata)
+            else:
+                logging.warning(f"Device registry returned {response.status_code} {response.text}")
+        except httpx.HTTPError as err:
+            logging.exception(f"{err}")
 
     return metadata
 
 
-def get_device_data(device_id: str) -> dict:
+async def get_kafka_topics_from_device_registry_endpoints(fail_on_error: bool) -> dict:
+    """
+    Update kafka topics information for endpoints from device registry.
+    This is done on startup and when device registry is updated.
+    """
+    # Create request to ENDPOINTS_URL and get data using httpx
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(DEVREG_ENDPOINTS_URL, headers=device_registry_request_headers)
+            if response.status_code == 200:
+                data = response.json()
+                logging.info(f"Got {len(data['endpoints'])} endpoints from device registry {DEVREG_ENDPOINTS_URL}")
+                endpoint_topic_mappings = {}
+                for endpoint in data["endpoints"]:
+                    try:
+                        endpoint_path = endpoint["endpoint_path"]
+                        raw_topic = endpoint["kafka_raw_data_topic"]
+                        parsed_topic = endpoint["kafka_parsed_data_topic"]
+                        group_id = endpoint["kafka_group_id"]
+
+                        endpoint_topic_mappings[endpoint_path] = {
+                            "raw_topic": raw_topic,
+                            "parsed_topic": parsed_topic,
+                            "group_id": group_id,
+                            "endpoint_path": endpoint_path,
+                        }
+
+                    except KeyError as e:
+                        logging.error(f"ATTENTION: endpoint data missing kafka topic information. {e} in {endpoint}")
+
+                print(f"REMOVE ME {endpoint_topic_mappings}")
+                if len(endpoint_topic_mappings) >= 1:
+                    return endpoint_topic_mappings
+
+        except Exception as e:
+            logging.error(f"Failed to get endpoints from device registry {DEVREG_ENDPOINTS_URL}: {e}")
+            if fail_on_error:
+                raise e
+
+    return None
+
+
+async def get_device_data(device_id: str) -> dict:
     """
     Get device metadata from device registry
 
@@ -98,7 +140,7 @@ def get_device_data(device_id: str) -> dict:
     """
     metadata = {}
     if os.getenv("DEVICE_REGISTRY_URL"):
-        return get_device_data_devreg(device_id)
+        return await get_device_data_devreg(device_id)
     else:
         logging.error("DEVICE_REGISTRY_URL must be defined, querying device metadata failed")
         return metadata
@@ -162,16 +204,16 @@ def create_parsed_data_message(timestamp: datetime.datetime, payload: list, devi
     return parsed_data
 
 
-def process_kafka_raw_topic(raw_data: bytes):
+async def process_kafka_raw_topic(raw_data: bytes):
     # TODO doc
     unpacked_data = data_unpack(raw_data)
     logging.info(pformat(unpacked_data))
-    device_id = unpacked_data["device_id"]
+    device_id = unpacked_data.get("device_id")
     if device_id is None:
         logging.warning("Device id not found in raw data - unpacked_data['device_id'] ")
         # TODO: store data for future re-processing
         return unpacked_data, None, None
-    device_data = get_device_data(device_id)
+    device_data = await get_device_data(device_id)
     #        if device_data is None or "device_metadata" not in device_data:
     if device_data is None:
         logging.warning(f"Device data not found for device_id: {device_id}")
@@ -189,45 +231,91 @@ def process_kafka_raw_topic(raw_data: bytes):
     return unpacked_data, device_data, parser_module_name
 
 
-def main():
-    init_script()
-    raw_data_topic = os.getenv("KAFKA_RAW_DATA_TOPIC_NAME")
-    parsed_data_topic = os.getenv("KAFKA_PARSED_DATA_TOPIC_NAME")
-    logging.info(f"Get Kafka consumer for {raw_data_topic} and producer for {parsed_data_topic}")
+# TODO group id variable
+async def consume_and_parse_data_stream(raw_data_topic, parsed_data_topic, producer):
+    logging.info(f"Get Kafka consumer for  {raw_data_topic}")
     # Create Kafka consumer for incoming raw data messages
-    consumer = get_kafka_consumer_by_envs(raw_data_topic)  # listen to multiple topics -> ?
-    producer = get_kafka_producer_by_envs()
-    if consumer is None or producer is None:
+    # TODO make group id a an argument to be passed to get_kafka_consumer_by_envs
+    consumer = None
+    try:
+        consumer = await get_aiokafka_consumer_by_envs([raw_data_topic])
+    except UnknownTopicOrPartitionError as err:
+        logging.error(f"Kafka Error. topic: {raw_data_topic} does not exist. error: {err}")
+        return
+
+    if consumer is None:
+        logging.critical("Kafka connection failed, exiting.")
+        return
+
+    # Loop forever for incoming messages
+    logging.info(f"Parser is waiting for raw data messages from Kafka topic {raw_data_topic}")
+
+    try:
+        async for msg in consumer:
+            logging.info("Preparing to parse payload")
+
+            [unpacked_data, device_data, parser_module_name] = await process_kafka_raw_topic(msg.value)
+            print(f"printing unpacked data {unpacked_data}")
+            if parser_module_name:
+                try:
+                    parser_module = importlib.import_module(parser_module_name)
+                except ModuleNotFoundError as err:
+                    logging.warning(f"Importing parser module failed: {err}")
+                    # TODO: store data for future re-processing
+                    continue
+                try:
+                    packet_timestamp, datalines = parser_module.create_datalines_from_raw_unpacked_data(unpacked_data)
+                    parsed_data = create_parsed_data_message(packet_timestamp, datalines, device_data)
+                    logging.debug(pformat(parsed_data))
+                    packed_data = data_pack(parsed_data)
+                    logging.info(f"Sending parsed data to Kafka topic {parsed_data_topic}")
+                    future = await producer.send(parsed_data_topic, packed_data)
+                    # .add_callback(on_send_success).add_errback( on_send_error)
+
+                    # Attach callbacks to the future
+                    # add_done_callback takes a function as an argument. a lambda is an anonymous function
+                    future.add_done_callback(lambda fut: asyncio.ensure_future(on_send_success(fut.result())))
+                    future.add_done_callback(lambda fut: fut.add_errback(on_send_error))
+
+                except Exception as err:
+                    logging.exception(f"parse failed : {err}")
+                    # TODO: send data to spare topic for future reprocessing?
+
+    finally:
+        await consumer.stop()
+        await producer.stop()
+
+
+async def main():
+    init_script()
+
+    logging.info("Get producer for pushing parsed data messages to Kafka.")
+    producer = await get_aiokafka_producer_by_envs()
+    if producer is None:
         logging.critical("Kafka connection failed, exiting.")
         exit(1)
 
-    # Loop forever for incoming messages
-    logging.info("Parser is waiting for raw data messages from Kafka.")
-    for msg in consumer:
-        logging.info("Preparing to parse payload")
+    tasks = []
+    endpoint_topic_mappings = await get_kafka_topics_from_device_registry_endpoints(True)
+    endpoint_topic_mappings.pop("/api/v1/data")
+    endpoints = endpoint_topic_mappings.keys()
+    for endpoint in endpoints:
+        logging.info(f"Setting up parser for path: {endpoint}")
 
-        [unpacked_data, device_data, parser_module_name] = process_kafka_raw_topic(msg.value)
-        print(f"printing unpacked data {unpacked_data}")
-        if parser_module_name:
-            try:
-                parser_module = importlib.import_module(parser_module_name)
-            except ModuleNotFoundError as err:
-                logging.warning(f"Importing parser module failed: {err}")
-                # TODO: store data for future re-processing
-                continue
-            try:
-                packet_timestamp, datalines = parser_module.create_datalines_from_raw_unpacked_data(unpacked_data)
-                parsed_data = create_parsed_data_message(packet_timestamp, datalines, device_data)
-                logging.debug(pformat(parsed_data))
-                packed_data = data_pack(parsed_data)
-                producer.send(parsed_data_topic, packed_data).add_callback(on_send_success).add_errback(on_send_error)
-            except Exception as err:
-                logging.exception(f"Failed to get parser module: {err}")
-                # TODO: send data to spare topic for future reprocessing?
+        e2t_map = endpoint_topic_mappings[endpoint]
+        print(e2t_map)
+        raw_data_topic = e2t_map["raw_topic"]
+        parsed_data_topic = e2t_map["parsed_topic"]
+        tasks.append(consume_and_parse_data_stream(raw_data_topic, parsed_data_topic, producer))
+
+    try:
+        await asyncio.gather(*tasks)
+    except KeyboardInterrupt:
+        print("Bye!")
 
 
 if __name__ == "__main__":
     try:
-        main()
+        asyncio.run(main())
     except KeyboardInterrupt:
         print("Bye!")
