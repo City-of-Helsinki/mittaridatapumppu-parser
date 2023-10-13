@@ -231,59 +231,80 @@ async def process_kafka_raw_topic(raw_data: bytes):
     return unpacked_data, device_data, parser_module_name
 
 
-# TODO group id variable
-async def consume_and_parse_data_stream(raw_data_topic, parsed_data_topic, producer):
-    logging.info(f"Get Kafka consumer for  {raw_data_topic}")
-    # Create Kafka consumer for incoming raw data messages
-    # TODO make group id a an argument to be passed to get_kafka_consumer_by_envs
-    consumer = None
+async def initialize_kafka_consumer(raw_data_topic):
+    """
+    Initialize Kafka consumer for raw data topic
+    :param raw_data_topic: Raw data topic's name
+    :return: AIOKafkaConsumer
+    """
     try:
-        consumer = await get_aiokafka_consumer_by_envs([raw_data_topic])
+        # TODO make group id a an argument to be passed to get_kafka_consumer_by_envs ?
+        return await get_aiokafka_consumer_by_envs([raw_data_topic])
     except UnknownTopicOrPartitionError as err:
         logging.error(f"Kafka Error. topic: {raw_data_topic} does not exist. error: {err}")
-        return
+        raise err
 
-    if consumer is None:
-        logging.critical("Kafka connection failed, exiting.")
-        return
+    except Exception as err:
+        logging.exception(f"Kafka Error. topic: {raw_data_topic} error: {err}")
+        raise err
 
-    # Loop forever for incoming messages
-    logging.info(f"Parser is waiting for raw data messages from Kafka topic {raw_data_topic}")
 
+async def produce_parsed_data_message(parsed_data_topic, producer, packed_data):
     try:
+        future = await producer.send(parsed_data_topic, packed_data)
+
+        # Attach callbacks to the future
+        # add_done_callback takes a function as an argument. a lambda is an anonymous function
+        future.add_done_callback(lambda fut: asyncio.ensure_future(on_send_success(fut.result())))
+        future.add_done_callback(lambda fut: fut.add_errback(on_send_error))
+    except Exception as e:
+        logging.error(f"Failed to send parsed data to Kafka topic {parsed_data_topic}: {e}")
+        raise e
+
+
+async def parse_data(unpacked_data, device_data, parser_module_name):
+    logging.info("Preparing to parse payload")
+    try:
+        parser_module = importlib.import_module(parser_module_name)
+        packet_timestamp, datalines = parser_module.create_datalines_from_raw_unpacked_data(unpacked_data)
+        parsed_data = create_parsed_data_message(packet_timestamp, datalines, device_data)
+        logging.debug(pformat(parsed_data))
+        packed_data = data_pack(parsed_data)
+        return packed_data
+
+    except ModuleNotFoundError as err:
+        logging.critical(f"Importing parser module  {parser_module_name} failed: {err}")
+        return
+        # TODO: store data for future re-processing
+    except Exception as err:
+        logging.exception(f"parsing failed at {parser_module_name} : {err}")
+        # TODO: send data to spare topic for future reprocessing?
+        return
+
+
+# TODO group id variable
+async def consume_and_parse_data_stream(raw_data_topic, parsed_data_topic, producer):
+    try:
+        logging.info(f"Get Kafka consumer for  {raw_data_topic}")
+        consumer = await initialize_kafka_consumer(raw_data_topic)
+
+        logging.info(f"Parser is waiting for raw data messages from Kafka topic {raw_data_topic}")
+        # Loop forever for incoming messages
         async for msg in consumer:
             logging.info("Preparing to parse payload")
 
             [unpacked_data, device_data, parser_module_name] = await process_kafka_raw_topic(msg.value)
             print(f"printing unpacked data {unpacked_data}")
             if parser_module_name:
-                try:
-                    parser_module = importlib.import_module(parser_module_name)
-                except ModuleNotFoundError as err:
-                    logging.warning(f"Importing parser module failed: {err}")
-                    # TODO: store data for future re-processing
-                    continue
-                try:
-                    packet_timestamp, datalines = parser_module.create_datalines_from_raw_unpacked_data(unpacked_data)
-                    parsed_data = create_parsed_data_message(packet_timestamp, datalines, device_data)
-                    logging.debug(pformat(parsed_data))
-                    packed_data = data_pack(parsed_data)
-                    logging.info(f"Sending parsed data to Kafka topic {parsed_data_topic}")
-                    future = await producer.send(parsed_data_topic, packed_data)
-                    # .add_callback(on_send_success).add_errback( on_send_error)
-
-                    # Attach callbacks to the future
-                    # add_done_callback takes a function as an argument. a lambda is an anonymous function
-                    future.add_done_callback(lambda fut: asyncio.ensure_future(on_send_success(fut.result())))
-                    future.add_done_callback(lambda fut: fut.add_errback(on_send_error))
-
-                except Exception as err:
-                    logging.exception(f"parse failed : {err}")
-                    # TODO: send data to spare topic for future reprocessing?
+                packed_data = await parse_data(unpacked_data, device_data, parser_module_name)
+            if packed_data:
+                await produce_parsed_data_message(parsed_data_topic, producer, packed_data)
 
     finally:
-        await consumer.stop()
-        await producer.stop()
+        if consumer:
+            await consumer.stop()
+        if producer:
+            await producer.stop()
 
 
 async def main():
