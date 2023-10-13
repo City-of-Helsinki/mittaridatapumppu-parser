@@ -205,30 +205,41 @@ def create_parsed_data_message(timestamp: datetime.datetime, payload: list, devi
 
 
 async def process_kafka_raw_topic(raw_data: bytes):
-    # TODO doc
-    unpacked_data = data_unpack(raw_data)
-    logging.info(pformat(unpacked_data))
-    device_id = unpacked_data.get("device_id")
-    if device_id is None:
-        logging.warning("Device id not found in raw data - unpacked_data['device_id'] ")
-        # TODO: store data for future re-processing
-        return unpacked_data, None, None
-    device_data = await get_device_data(device_id)
-    #        if device_data is None or "device_metadata" not in device_data:
-    if device_data is None:
-        logging.warning(f"Device data not found for device_id: {device_id}")
-        # TODO: store data for future re-processing
-        return unpacked_data, None, None
+    """
+    Process raw data received from Kafka.
+    :param raw_data: Raw data received from Kafka
+    :return: unpacked_data, device_data, parser_module_name
+    """
 
-    parser_module_name = device_data.get("parser_module", "")
-    if parser_module_name == "":
-        logging.warning("Parser module name not found")
-        # TODO: store data for future re-processing
-        return unpacked_data, device_data, None
+    try:
+        unpacked_data = data_unpack(raw_data)
+        logging.info(pformat(unpacked_data))
 
-    print(device_data)
-    print(f"printing parser module {parser_module_name}")
-    return unpacked_data, device_data, parser_module_name
+        device_id = unpacked_data.get("device_id")
+        if device_id is None:
+            logging.warning("Device id not found in raw data - unpacked_data['device_id'] ")
+            # TODO: store data for future re-processing
+            return unpacked_data, None, None
+        device_data = await get_device_data(device_id)
+        #        if device_data is None or "device_metadata" not in device_data:
+        if device_data is None:
+            logging.warning(f"Device data not found for device_id: {device_id}")
+            # TODO: store data for future re-processing
+            return unpacked_data, None, None
+
+        parser_module_name = device_data.get("parser_module", "")
+        if parser_module_name == "":
+            logging.warning("Parser module name not found")
+            # TODO: store data for future re-processing
+            return unpacked_data, device_data, None
+
+        print(device_data)
+        print(f"printing parser module {parser_module_name}")
+        return unpacked_data, device_data, parser_module_name
+
+    except Exception as err:
+        logging.exception(f"Failed to process raw data: {err}")
+        return
 
 
 async def initialize_kafka_consumer(raw_data_topic):
@@ -250,6 +261,12 @@ async def initialize_kafka_consumer(raw_data_topic):
 
 
 async def produce_parsed_data_message(parsed_data_topic, producer, packed_data):
+    """
+    Produce parsed data message to Kafka
+    :param parsed_data_topic: Parsed data topic's name
+    :param producer: AIOKafka producer
+    :param packed_data: Packed data to be sent to Kafka
+    """
     try:
         future = await producer.send(parsed_data_topic, packed_data)
 
@@ -263,6 +280,13 @@ async def produce_parsed_data_message(parsed_data_topic, producer, packed_data):
 
 
 async def parse_data(unpacked_data, device_data, parser_module_name):
+    """
+    Parse data using parser module
+    :param unpacked_data: Unpacked data
+    :param device_data: Device data
+    :param parser_module_name: Parser module's name
+    :return: Packed data
+    """
     logging.info("Preparing to parse payload")
     try:
         parser_module = importlib.import_module(parser_module_name)
@@ -284,6 +308,12 @@ async def parse_data(unpacked_data, device_data, parser_module_name):
 
 # TODO group id variable
 async def consume_and_parse_data_stream(raw_data_topic, parsed_data_topic, producer):
+    """
+    Consume raw data from Kafka and parse it
+    :param raw_data_topic: Raw data topic's name
+    :param parsed_data_topic: Parsed data topic's name
+    :param producer: AIOKafka producer
+    """
     try:
         logging.info(f"Get Kafka consumer for  {raw_data_topic}")
         consumer = await initialize_kafka_consumer(raw_data_topic)
@@ -301,6 +331,8 @@ async def consume_and_parse_data_stream(raw_data_topic, parsed_data_topic, produ
                 await produce_parsed_data_message(parsed_data_topic, producer, packed_data)
 
     finally:
+        logging.info(f"Stopped Listening to {raw_data_topic}")
+        logging.info("Closing Kafka consumer and producer.")
         if consumer:
             await consumer.stop()
         if producer:
