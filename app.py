@@ -19,12 +19,13 @@ from fvhiot.utils.aiokafka import (
 )
 
 # TODO: for testing, add better defaults (or remove completely to make sure it is set in env)
-DEVREG_ENDPOINTS_URL = os.getenv("DEVREG_ENDPOINTS_URL", "http://127.0.0.1:8000/api/v1/hosts/localhost/")
-DEVREG_API_TOKEN = os.getenv("DEVREG_API_TOKEN", "abcdef1234567890abcdef1234567890abcdef12")
+DEVICE_REGISTRY_ENDPOINTS_URL = os.getenv("DEVICE_REGISTRY_ENDPOINTS_URL", "http://127.0.0.1:8000/api/v1/hosts/localhost/")
+DEVICE_REGISTRY_URL = os.getenv("DEVICE_REGISTRY_URL", "http://127.0.0.1:8000/api/v1/")
+DEVICE_REGISTRY_API_TOKEN = os.getenv("DEVICE_REGISTRY_API_TOKEN", "abcdef1234567890abcdef1234567890abcdef12")
 
 device_registry_request_headers = {
-    "Authorization": f"Token {DEVREG_API_TOKEN}",
-    "User-Agent": "mittaridatapumppu-endpoint/0.1.0",
+    "Authorization": f"Token {DEVICE_REGISTRY_API_TOKEN}",
+    "User-Agent": "mittaridatapumppu-parser/0.1.0",
     "Accept": "application/json",
 }
 
@@ -55,9 +56,7 @@ async def get_device_data_devreg(device_id: str) -> dict:
     :return: Device data in a dict
     """
     metadata = {}
-    devreg_url = os.getenv("DEVICE_REGISTRY_URL")
-    devreg_token = os.getenv("DEVICE_REGISTRY_TOKEN")
-    if devreg_url is None or devreg_token is None:
+    if DEVICE_REGISTRY_URL is None or DEVICE_REGISTRY_API_TOKEN is None:
         logging.error(
             "DEVICE_REGISTRY_URL and DEVICE_REGISTRY_TOKEN must be defined, " "querying device metadata failed"
         )
@@ -68,16 +67,12 @@ async def get_device_data_devreg(device_id: str) -> dict:
     # NOTE: creating redis client is very cheap operation, but perhaps it
     # should be benchmarked? Another solution would be to create client once
     # (like kafka consumer) and re-using it in subsequent calls
-    url = f"{devreg_url}/devices/{device_id}/"
+    url = f"{DEVICE_REGISTRY_URL}/devices/{device_id}/"
     logging.info(f"Querying metadata from {url}")
     # Get metadata from device registry using httpx
-    headers = {
-        "Authorization": f"Token {devreg_token}",
-        "User-Agent": "mittaridatapumppu-parser/0.0.1",
-    }
     async with httpx.AsyncClient() as client:
         try:
-            response = await client.get(url, headers=headers)
+            response = await client.get(url, headers=device_registry_request_headers)
             if response.status_code == 200:
                 metadata = response.json()
                 logging.debug(metadata)
@@ -97,10 +92,10 @@ async def get_kafka_topics_from_device_registry_endpoints(fail_on_error: bool) -
     # Create request to ENDPOINTS_URL and get data using httpx
     async with httpx.AsyncClient() as client:
         try:
-            response = await client.get(DEVREG_ENDPOINTS_URL, headers=device_registry_request_headers)
+            response = await client.get(DEVICE_REGISTRY_ENDPOINTS_URL, headers=device_registry_request_headers)
             if response.status_code == 200:
                 data = response.json()
-                logging.info(f"Got {len(data['endpoints'])} endpoints from device registry {DEVREG_ENDPOINTS_URL}")
+                logging.info(f"Got {len(data['endpoints'])} endpoints from device registry {DEVICE_REGISTRY_ENDPOINTS_URL}")
                 endpoint_topic_mappings = {}
                 for endpoint in data["endpoints"]:
                     try:
@@ -124,7 +119,7 @@ async def get_kafka_topics_from_device_registry_endpoints(fail_on_error: bool) -
                     return endpoint_topic_mappings
 
         except Exception as e:
-            logging.error(f"Failed to get endpoints from device registry {DEVREG_ENDPOINTS_URL}: {e}")
+            logging.error(f"Failed to get endpoints from device registry {DEVICE_REGISTRY_ENDPOINTS_URL}: {e}")
             if fail_on_error:
                 raise e
 
@@ -350,6 +345,7 @@ async def main():
 
     tasks = []
     endpoint_topic_mappings = await get_kafka_topics_from_device_registry_endpoints(True)
+    print(endpoint_topic_mappings)
     endpoint_topic_mappings.pop("/api/v1/data")
     endpoints = endpoint_topic_mappings.keys()
     for endpoint in endpoints:
