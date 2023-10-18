@@ -19,12 +19,12 @@ from fvhiot.utils.aiokafka import (
 )
 
 # TODO: for testing, add better defaults (or remove completely to make sure it is set in env)
-DEVICE_REGISTRY_ENDPOINTS_URL = os.getenv("DEVICE_REGISTRY_ENDPOINTS_URL", "http://127.0.0.1:8000/api/v1/hosts/localhost/")
+ENDPOINT_CONFIG_URL = os.getenv("ENDPOINT_CONFIG_URL", "http://127.0.0.1:8000/api/v1/hosts/localhost/")
 DEVICE_REGISTRY_URL = os.getenv("DEVICE_REGISTRY_URL", "http://127.0.0.1:8000/api/v1/")
-DEVICE_REGISTRY_API_TOKEN = os.getenv("DEVICE_REGISTRY_API_TOKEN", "abcdef1234567890abcdef1234567890abcdef12")
+DEVICE_REGISTRY_TOKEN = os.getenv("DEVICE_REGISTRY_TOKEN", "abcdef1234567890abcdef1234567890abcdef12")
 
 device_registry_request_headers = {
-    "Authorization": f"Token {DEVICE_REGISTRY_API_TOKEN}",
+    "Authorization": f"Token {DEVICE_REGISTRY_TOKEN}",
     "User-Agent": "mittaridatapumppu-parser/0.1.0",
     "Accept": "application/json",
 }
@@ -56,7 +56,7 @@ async def get_device_data_devreg(device_id: str) -> dict:
     :return: Device data in a dict
     """
     metadata = {}
-    if DEVICE_REGISTRY_URL is None or DEVICE_REGISTRY_API_TOKEN is None:
+    if DEVICE_REGISTRY_URL is None or DEVICE_REGISTRY_TOKEN is None:
         logging.error(
             "DEVICE_REGISTRY_URL and DEVICE_REGISTRY_TOKEN must be defined, " "querying device metadata failed"
         )
@@ -92,10 +92,10 @@ async def get_kafka_topics_from_device_registry_endpoints(fail_on_error: bool) -
     # Create request to ENDPOINTS_URL and get data using httpx
     async with httpx.AsyncClient() as client:
         try:
-            response = await client.get(DEVICE_REGISTRY_ENDPOINTS_URL, headers=device_registry_request_headers)
+            response = await client.get(ENDPOINT_CONFIG_URL, headers=device_registry_request_headers)
             if response.status_code == 200:
                 data = response.json()
-                logging.info(f"Got {len(data['endpoints'])} endpoints from device registry {DEVICE_REGISTRY_ENDPOINTS_URL}")
+                logging.info(f"Got {len(data['endpoints'])} endpoints from device registry {ENDPOINT_CONFIG_URL}")
                 endpoint_topic_mappings = {}
                 for endpoint in data["endpoints"]:
                     try:
@@ -119,7 +119,7 @@ async def get_kafka_topics_from_device_registry_endpoints(fail_on_error: bool) -
                     return endpoint_topic_mappings
 
         except Exception as e:
-            logging.error(f"Failed to get endpoints from device registry {DEVICE_REGISTRY_ENDPOINTS_URL}: {e}")
+            logging.error(f"Failed to get endpoints from device registry {ENDPOINT_CONFIG_URL}: {e}")
             if fail_on_error:
                 raise e
 
@@ -228,8 +228,8 @@ async def process_kafka_raw_topic(raw_data: bytes):
             # TODO: store data for future re-processing
             return unpacked_data, device_data, None
 
-        print(device_data)
-        print(f"printing parser module {parser_module_name}")
+        #print(device_data)
+        logging.info(f"printing parser module {parser_module_name}")
         return unpacked_data, device_data, parser_module_name
 
     except Exception as err:
@@ -293,12 +293,12 @@ async def parse_data(unpacked_data, device_data, parser_module_name):
 
     except ModuleNotFoundError as err:
         logging.critical(f"Importing parser module  {parser_module_name} failed: {err}")
-        return
+        return None
         # TODO: store data for future re-processing
     except Exception as err:
         logging.exception(f"parsing failed at {parser_module_name} : {err}")
         # TODO: send data to spare topic for future reprocessing?
-        return
+        return None
 
 
 # TODO group id variable
@@ -319,7 +319,8 @@ async def consume_and_parse_data_stream(raw_data_topic, parsed_data_topic, produ
             logging.info("Preparing to parse payload")
 
             [unpacked_data, device_data, parser_module_name] = await process_kafka_raw_topic(msg.value)
-            print(f"printing unpacked data {unpacked_data}")
+            logging.debug(f"printing unpacked data {unpacked_data}")
+            packed_data = None
             if parser_module_name:
                 packed_data = await parse_data(unpacked_data, device_data, parser_module_name)
             if packed_data:
@@ -345,14 +346,13 @@ async def main():
 
     tasks = []
     endpoint_topic_mappings = await get_kafka_topics_from_device_registry_endpoints(True)
-    print(endpoint_topic_mappings)
+    logging.debug(endpoint_topic_mappings)
     endpoint_topic_mappings.pop("/api/v1/data")
     endpoints = endpoint_topic_mappings.keys()
     for endpoint in endpoints:
         logging.info(f"Setting up parser for path: {endpoint}")
 
         e2t_map = endpoint_topic_mappings[endpoint]
-        print(e2t_map)
         raw_data_topic = e2t_map["raw_topic"]
         parsed_data_topic = e2t_map["parsed_topic"]
         tasks.append(consume_and_parse_data_stream(raw_data_topic, parsed_data_topic, producer))
