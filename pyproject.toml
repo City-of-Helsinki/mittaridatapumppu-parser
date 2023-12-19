@@ -1,6 +1,3 @@
-[tool.setuptools]
-py-modules = []
-
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
@@ -17,12 +14,9 @@ requires-python = ">=3.10"
 dynamic = ["version"]
 
 dependencies = [
+  "fvhiot[kafka]@https://github.com/ForumViriumHelsinki/FVHIoT-python/archive/refs/tags/v0.4.1.zip",
   "httpx",
-  "aiokafka",
-  "isodate",
-  "fvhiot@https://github.com/ForumViriumHelsinki/FVHIoT-python/archive/refs/tags/v0.3.1.zip",
   "kafka-python",
-  "msgpack",
   "pydantic",
   "sentry_sdk"
 ]
