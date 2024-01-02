@@ -50,7 +50,7 @@ frozenlist==1.4.1
     # via
     #   aiohttp
     #   aiosignal
-fvhiot @ https://github.com/ForumViriumHelsinki/FVHIoT-python/archive/refs/tags/v0.4.1.zip
+fvhiot @ https://github.com/ForumViriumHelsinki/FVHIoT-python/archive/refs/tags/v1.0.0.zip
     # via mittaridatapumppu-parser (pyproject.toml)
 gunicorn==21.2.0
     # via mittaridatapumppu-parser (pyproject.toml)
