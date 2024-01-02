@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from kafka.producer.future import RecordMetadata
-from pydantic.error_wrappers import ValidationError
+from pydantic import ValidationError
 
 from fvhiot.models.thingpark import DevEuiUplink
 from fvhiot.utils import init_script
