@@ -18,7 +18,7 @@ certifi==2023.11.17
     #   httpcore
     #   httpx
     #   sentry-sdk
-fvhiot @ https://github.com/ForumViriumHelsinki/FVHIoT-python/archive/refs/tags/v0.4.1.zip
+fvhiot @ https://github.com/ForumViriumHelsinki/FVHIoT-python/archive/refs/tags/v1.0.0.zip
     # via mittaridatapumppu-parser (pyproject.toml)
 h11==0.14.0
     # via httpcore
