@@ -1,5 +1,3 @@
 *
-!app.py
-!endpoints/
-!requirements.txt
-!tests/
+!/parser
+!/requirements.txt
