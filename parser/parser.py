@@ -201,7 +201,7 @@ def create_parsed_data_message(
     return parsed_data
 
 
-def main():
+def parser():
     init_script()
     raw_data_topic = os.getenv("KAFKA_RAW_DATA_TOPIC_NAME")
     parsed_data_topic = os.getenv("KAFKA_PARSED_DATA_TOPIC_NAME")
@@ -228,7 +228,8 @@ def main():
         try:
             uplink_obj = get_uplink_obj(data)  # TODO: handle errors here
         except KeyError as err:
-            logging.warning(f"KeyError '{err}', message has no DevEUI_uplink key?")
+            logging.warning(
+                f"KeyError '{err}', message has no DevEUI_uplink key?")
             continue
         except ValidationError as err:
             logging.warning(f"ValidationError '{err}'")
@@ -290,19 +291,19 @@ def healthz():
 
 @app.route("/")
 def hello():
-    return "{name} {version}".format(name=__package__, version=__version__)
+    return "{name} {version}".format(name=__name__, version=__version__)
 
 
 def run_flask():
     app.run(host="0.0.0.0", port=5000)
 
 
-if __name__ == "__main__":
-    main_process = Process(target=main)
+def main():
+    parser_process = Process(target=parser)
     flask_process = Process(target=run_flask)
 
-    main_process.start()
+    parser_process.start()
     flask_process.start()
 
-    main_process.join()
+    parser_process.join()
     flask_process.terminate()
