@@ -1,42 +1,41 @@
 [build-system]
-requires = ["setuptools"]
+requires = [
+    "setuptools>=60",
+    "setuptools-scm>=8.0"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+version_file = "parser/_version.py"
 
 [tool.ruff]
 line-length = 120
-target-version = "py311"
+select = ["E", "F", "B", "Q"]
 
 [project]
 name = "mittaridatapumppu-parser"
-description = ""
+description = """\
+Python based microservice that consumes streaming data and converts it from \
+raw format to something else as defined in corresponding parser modules \
+obtained from device metadata \
+"""
 readme = "README.md"
 requires-python = ">=3.10"
-version = "v0.1.2"
+dynamic = ["version"]
 dependencies = [
   "fvhiot[kafka]@https://github.com/ForumViriumHelsinki/FVHIoT-python/releases/download/v1.0.2/FVHIoT-1.0.2-py3-none-any.whl",
-  "httpx",
-  "kafka-python",
-  "pydantic",
-  "sentry_sdk"
+  "fastapi ~= 0.109.0",
+  "kafka-python ~= 2.0.2",
+  "httpx ~= 0.26.0",
+  "pydantic ~= 2.5.3",
+  "sentry_asgi ~= 0.2.0",
+  "uvicorn ~= 0.27.0"
 ]
 
 [project.optional-dependencies]
 dev = [
-  "autoflake",
-  "autopep8",
-  "black",
-  "flake8",
-  "gunicorn",
-  "httpx",
-  "isort",
-  "pep8-naming",
-  "pre-commit",
-  "pydantic",
-  "pytest",
-  "pytest-asyncio",
-  "pytest-cov",
+  "pre-commit ~= 3.6.0",
 ]
 test = [
-    "pytest",
-    "requests"
-] #pip-compile --resolver=backtracking --extra test pyproject.toml
+  "ruff ~= 0.1.15",
+  "msgpack ~= 1.0.7"
+]

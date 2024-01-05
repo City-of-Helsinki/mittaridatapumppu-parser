@@ -27,4 +27,5 @@ RUN chgrp -R 0 /home/app && \
 
 USER app
 
-CMD ["python", "./app.py"]
+EXPOSE 5000
+CMD ["python", "parser"]
