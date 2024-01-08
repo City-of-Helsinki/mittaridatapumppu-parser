@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import pathlib
+from multiprocessing import Process
 from pprint import pformat
 from zoneinfo import ZoneInfo
 
@@ -15,6 +16,10 @@ from fvhiot.models.thingpark import DevEuiUplink
 from fvhiot.utils import init_script
 from fvhiot.utils.data import data_unpack, data_pack
 from fvhiot.utils.kafka import get_kafka_producer_by_envs, get_kafka_consumer_by_envs
+from _version import __version__
+from flask import Flask
+
+app = Flask(__name__)
 
 
 def backup_messages(raw_data_topic: str, msg):
@@ -167,7 +172,8 @@ def create_parsed_data_message(
         )  # create mapping for silly "0", "1", "2" named columns and real data keys
         for k in keys:
             col_name = str(col_cnt)  # "0", "1", "2" and so on
-            columns[col_name] = {"name": k}  # e.g. columns["0] = {"name" : "temp"}
+            # e.g. columns["0] = {"name" : "temp"}
+            columns[col_name] = {"name": k}
             col_map[k] = col_name  # e.g. col_map["temp"] = "0"
             col_cnt += 1
         for item in payload:  # create list of data items
@@ -195,7 +201,7 @@ def create_parsed_data_message(
     return parsed_data
 
 
-def main():
+def parser():
     init_script()
     raw_data_topic = os.getenv("KAFKA_RAW_DATA_TOPIC_NAME")
     parsed_data_topic = os.getenv("KAFKA_PARSED_DATA_TOPIC_NAME")
@@ -217,11 +223,13 @@ def main():
         logging.info(pformat(data))
         # if os.getenv("DEBUG"):
         #    backup_messages(raw_data_topic, msg)
-        data["raw_data_topic"] = raw_data_topic  # TODO: add this value in endpoint
+        # TODO: add this value in endpoint
+        data["raw_data_topic"] = raw_data_topic
         try:
             uplink_obj = get_uplink_obj(data)  # TODO: handle errors here
         except KeyError as err:
-            logging.warning(f"KeyError '{err}', message has no DevEUI_uplink key?")
+            logging.warning(
+                f"KeyError '{err}', message has no DevEUI_uplink key?")
             continue
         except ValidationError as err:
             logging.warning(f"ValidationError '{err}'")
@@ -271,8 +279,31 @@ def main():
             # TODO: send data to spare topic for future reprocessing?
 
 
-if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("Bye!")
+@app.route("/liveness")
+def healthx():
+    return "Liveness check completed"
+
+
+@app.route("/readiness")
+def healthz():
+    return "Readiness check completed"
+
+
+@app.route("/")
+def hello():
+    return "{name} {version}".format(name=__name__, version=__version__)
+
+
+def run_flask():
+    app.run(host="0.0.0.0", port=5000)
+
+
+def main():
+    parser_process = Process(target=parser)
+    flask_process = Process(target=run_flask)
+
+    parser_process.start()
+    flask_process.start()
+
+    parser_process.join()
+    flask_process.terminate()
