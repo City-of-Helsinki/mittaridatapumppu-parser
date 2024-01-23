@@ -11,9 +11,9 @@ name = "mittaridatapumppu-parser"
 description = ""
 readme = "README.md"
 requires-python = ">=3.10"
-version = "v0.1.1"
+version = "v0.1.2"
 dependencies = [
-  "fvhiot[kafka]@https://github.com/ForumViriumHelsinki/FVHIoT-python/archive/refs/tags/v1.0.2.zip",
+  "fvhiot[kafka]@https://github.com/ForumViriumHelsinki/FVHIoT-python/releases/download/v1.0.2/FVHIoT-1.0.2-py3-none-any.whl",
   "httpx",
   "kafka-python",
   "pydantic",

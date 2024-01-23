@@ -21,7 +21,7 @@ certifi==2023.11.17
     #   sentry-sdk
 charset-normalizer==3.3.2
     # via requests
-fvhiot @ https://github.com/ForumViriumHelsinki/FVHIoT-python/archive/refs/tags/v1.0.0.zip
+fvhiot @ https://github.com/ForumViriumHelsinki/FVHIoT-python/releases/download/v1.0.2/FVHIoT-1.0.2-py3-none-any.whl
     # via mittaridatapumppu-parser (pyproject.toml)
 h11==0.14.0
     # via httpcore
