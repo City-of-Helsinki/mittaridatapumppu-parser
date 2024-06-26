@@ -18,7 +18,7 @@ from fvhiot.models.thingpark import DevEuiUplink
 from fvhiot.utils import init_script
 from fvhiot.utils.data import data_unpack, data_pack
 from fvhiot.utils.kafka import get_kafka_producer_by_envs, get_kafka_consumer_by_envs
-from _version import __version__
+# from _version import __version__
 from fastapi import FastAPI
 from sentry_asgi import SentryMiddleware
 
@@ -304,7 +304,8 @@ def readiness():
 
 @app.get("/")
 def index():
-    return "{name} {version}".format(name=__package__, version=__version__)
+    return PlainTextResponse("OK")
+    # return "{name} {version}".format(name=__package__, version=__version__)
 
 
 def run_fastapi():
